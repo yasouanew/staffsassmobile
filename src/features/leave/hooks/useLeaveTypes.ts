@@ -17,6 +17,13 @@ export type UseLeaveTypesResult = {
     isError: boolean;
     error: AppError | null;
     retry: () => void;
+    /**
+     * Whether a fetch is in flight right now, including a repeat fetch over
+     * already-cached types. Distinct from `isLoading`, which is only true when
+     * there is nothing usable to show yet — this is what drives a pull-to-refresh
+     * spinner, which must appear over content that is already on screen.
+     */
+    isRefreshing: boolean;
 };
 
 function unwrapTypes(payload: PaginatedData<LeaveType> | LeaveType[]): LeaveType[] {
@@ -65,6 +72,11 @@ export function useLeaveTypes(): UseLeaveTypesResult {
             retry: () => {
                 void query.refetch();
             },
+            // `isFetching` rather than `isRefetching`: the first load is also an
+            // in-flight fetch, and a pull during the cold window should keep the
+            // control engaged for the whole request instead of releasing it the
+            // moment `isRefetching` fails to become true.
+            isRefreshing: query.isFetching,
         }),
         [query, isUnsupported],
     );

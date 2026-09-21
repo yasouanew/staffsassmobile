@@ -1,6 +1,7 @@
 import { StyleSheet, View, type ViewStyle } from 'react-native';
 
 import { spacing } from '../../theme/spacing';
+import { lineHeight } from '../../theme/typography';
 import { useTheme } from '../../theme/useTheme';
 import { AppText } from '../AppText/AppText';
 
@@ -13,6 +14,19 @@ import { AppText } from '../AppText/AppText';
  * - shift: `scheduled | completed | cancelled | swap_requested`
  * - leave request: `pending | approved | rejected`
  * - roster: `draft | published`
+ *
+ * Three Phase 2 constraints shape it:
+ *
+ *  1. **Maximum roundness.** The shape is a stadium (pill), not a rounded
+ *     rectangle; the radius is the `pill.full` sentinel so the ends are true
+ *     semicircles at every type size.
+ *  2. **Locked to one line with explicit bounds.** A status word is a single
+ *     atomic fact. It must never wrap (which turns the pill into a lozenge) and
+ *     never clip (which shows half a glyph) — so the text is `numberOfLines={1}`
+ *     with an ellipsis tail, and the height is derived from tokens rather than
+ *     from content.
+ *  3. **Never colour-only.** The word itself is always present, so the badge is
+ *     still readable in greyscale and by a screen reader.
  *
  * Unknown values fall back to a neutral grey badge rather than rendering nothing —
  * if the backend adds a status, the UI degrades gracefully instead of leaving a
@@ -60,7 +74,13 @@ function humanize(status: string): string {
 export function StatusBadge({ status, label, tone, style }: StatusBadgeProps) {
     const theme = useTheme();
     const resolvedTone = tone ?? STATUS_TONES[status] ?? 'neutral';
+    const resolvedLabel = label ?? humanize(status);
 
+    /**
+     * Tone → the Phase 1 soft/strong pair. The `*Soft` fill with the `*Strong`
+     * foreground is contrast-tuned in both schemes, so the same mapping is legible
+     * on light and dark without a per-scheme branch here.
+     */
     const toneColors: Record<StatusBadgeTone, { background: string; text: string }> = {
         neutral: { background: theme.colors.surfaceMuted, text: theme.colors.textSecondary },
         info: { background: theme.colors.infoSoft, text: theme.colors.infoStrong },
@@ -75,19 +95,23 @@ export function StatusBadge({ status, label, tone, style }: StatusBadgeProps) {
         <View
             // A status change is meaningful content, so screen readers announce it.
             accessibilityRole="text"
-            accessibilityLabel={label ?? humanize(status)}
+            accessibilityLabel={resolvedLabel}
             style={[
                 styles.badge,
                 {
                     backgroundColor: background,
-                    borderRadius: theme.radius.xs,
+                    borderRadius: theme.radius.full,
                     paddingHorizontal: spacing.xs,
                     paddingVertical: spacing.xxs,
+                    // The height floor is tokens-only: one caption line plus the
+                    // vertical padding. A pill can therefore never collapse below
+                    // its own curve, however short the word is.
+                    minHeight: lineHeight.xs + spacing.xxs * 2,
                 },
                 style,
             ]}>
-            <AppText variant="label" style={{ color: text }} numberOfLines={1}>
-                {label ?? humanize(status)}
+            <AppText variant="label" style={{ color: text }} numberOfLines={1} ellipsizeMode="tail">
+                {resolvedLabel}
             </AppText>
         </View>
     );
@@ -95,6 +119,12 @@ export function StatusBadge({ status, label, tone, style }: StatusBadgeProps) {
 
 const styles = StyleSheet.create({
     badge: {
+        // Hugs its content; a stretched badge would look like a banner.
         alignSelf: 'flex-start',
+        alignItems: 'center',
+        justifyContent: 'center',
+        // With `numberOfLines={1}` the label ellipsises at the parent's edge
+        // rather than overflowing it.
+        maxWidth: '100%',
     },
 });

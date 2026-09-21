@@ -1,19 +1,22 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { FlatList, Pressable, StyleSheet, View, type ListRenderItemInfo } from 'react-native';
 
-import { AppCard } from '../../../components/AppCard';
 import { AppHeader } from '../../../components/AppHeader';
 import { AppText } from '../../../components/AppText';
 import { EmptyState } from '../../../components/EmptyState';
 import { ErrorView } from '../../../components/ErrorView';
+import { FilterChip } from '../../../components/FilterChip';
+import { FloatingActionButton } from '../../../components/FloatingActionButton';
 import { LoadingView } from '../../../components/LoadingView';
 import { ScreenContainer } from '../../../components/ScreenContainer';
 import { StatusBadge } from '../../../components/StatusBadge';
 import type { LeaveStackParamList } from '../../../navigation/types';
-import { useTheme } from '../../../theme';
+import { borderWidths, radius, useTheme } from '../../../theme';
+import type { Colors } from '../../../theme/colors';
+import { spacing } from '../../../theme/spacing';
 import type { LeaveRequestStatus } from '../../../types/api';
-import { formatDate } from '../../../utils/date';
+import { formatDate, formatRelative } from '../../../utils/date';
 import { useLeaveRequests } from '../hooks';
 import type { LeaveRequest } from '../types';
 import { formatTotalDays, sessionLabel } from '../utils/leaveRequest';
@@ -23,7 +26,7 @@ type Props = NativeStackScreenProps<LeaveStackParamList, 'LeaveList'>;
 type FilterKey = LeaveRequestStatus | 'all';
 
 /**
- * Filters offered in the header. `all` maps to "no filter" rather than a status,
+ * Filters offered above the feed. `all` maps to "no filter" rather than a status,
  * because the API treats an absent `status` as "every status" — inventing an `all`
  * value would send an invalid enum and return a 422.
  */
@@ -37,6 +40,38 @@ const FILTERS: readonly { key: FilterKey; label: string }[] = [
 const PAGE_SIZE = 20;
 
 /**
+ * Accent-strip colour by status.
+ *
+ * The strip is the card's second, non-textual encoding of status: it is legible at a
+ * glance while scrolling, before the `StatusBadge` label is read. `*Strong` rather
+ * than the soft tone because the stripe is a 4pt sliver — a soft tint on a 4pt sliver
+ * against white reads as "no stripe at all".
+ *
+ * Keyed by a `Record` over the status union so adding a status to the API without
+ * adding it here fails the build rather than silently rendering an unaccented card.
+ */
+const STATUS_ACCENT: Record<LeaveRequestStatus, keyof Colors> = {
+    approved: 'successStrong',
+    pending: 'warningStrong',
+    rejected: 'dangerStrong',
+};
+
+/**
+ * Fixed row height, in points.
+ *
+ * `LeaveRow` clamps its content so this stays true: the widest card is position line
+ * + date/days line + sessions line + a two-line reason clamped to `numberOfLines={2}`,
+ * which at the `caption`/`bodyStrong` metrics tops out around 88pt including padding
+ * and the badge. 96 gives that a margin and still divides evenly by 8 (the grid unit).
+ *
+ * The card's own `marginBottom` is *not* part of this figure — `ItemSeparatorComponent`
+ * and `contentContainerStyle.gap` sit outside the item, and `getItemLayout` measures
+ * the item only. Putting the gap inside this number instead would make the list drift
+ * by one gap per screen.
+ */
+export const LEAVE_ROW_HEIGHT = 96;
+
+/**
  * My Leave (spec Screen 8).
  *
  * `GET /leave-requests` is auto-scoped to the token's employee (spec §0.5), so no
@@ -44,7 +79,8 @@ const PAGE_SIZE = 20;
  * [`useLeaveRequests`](src/features/leave/hooks/useLeaveRequests.ts:1).
  *
  * There is no balance endpoint — only `total_days` per request is shown, never an
- * authoritative balance (spec Screen 8 §5). There is no cancel action (G6).
+ * authoritative balance (spec Screen 8 §5). There is no cancel action (gap G6), which
+ * is why nothing in this feed offers one.
  */
 export function LeaveListScreen({ navigation }: Props): React.JSX.Element {
     const theme = useTheme();
@@ -104,21 +140,33 @@ export function LeaveListScreen({ navigation }: Props): React.JSX.Element {
         }
     };
 
+    const handleOpenRequest = useCallback(
+        (leaveRequestId: number): void => {
+            navigation.navigate('LeaveDetail', { leaveRequestId });
+        },
+        [navigation],
+    );
+
+    const handleCreate = useCallback((): void => {
+        navigation.navigate('CreateLeaveRequest');
+    }, [navigation]);
+
+    /*
+     * The chip row is a sibling of the feed rather than its `ListHeaderComponent`.
+     *
+     * Inside the header it would unmount once the user scrolled past it, taking the
+     * selected filter off screen while its results were still on screen — the filter
+     * would become invisible but still applied, which is the single most confusing
+     * state a filtered list can be in. As a sibling it also has to be wrapped by the
+     * screen rather than the list, so it never inherits the list's scroll offset.
+     */
     const header = (
         <AppHeader
             title="Leave"
-            subtitle="Your leave requests."
-            action={
-                <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Request leave"
-                    testID="leave-request-action"
-                    onPress={() => navigation.navigate('CreateLeaveRequest')}
-                    hitSlop={theme.spacing.sm}>
-                    <AppText variant="bodyStrong" color="textLink">
-                        + Request
-                    </AppText>
-                </Pressable>
+            subtitle={
+                pendingTotal > 0
+                    ? `${pendingTotal} awaiting a decision`
+                    : 'Your leave requests.'
             }
         />
     );
@@ -142,76 +190,48 @@ export function LeaveListScreen({ navigation }: Props): React.JSX.Element {
     }
 
     return (
-        <ScreenContainer hasHeader scrollable={false} withFabSpacing>
+        <ScreenContainer hasHeader scrollable={false}>
             {header}
 
-            <View style={[styles.body, { gap: theme.spacing.sm }]}>
-                {pendingTotal > 0 ? (
-                    <View
-                        testID="leave-pending-count"
-                        accessibilityRole="text"
-                        style={[
-                            styles.pendingBanner,
-                            {
-                                backgroundColor: theme.colors.warningSoft,
-                                borderRadius: theme.radius.md,
-                                paddingVertical: theme.spacing.sm,
-                                paddingHorizontal: theme.spacing.md,
-                            },
-                        ]}>
-                        <AppText variant="bodyStrong" color="warningStrong">
-                            {pendingTotal} pending
-                        </AppText>
-                        <AppText variant="caption" color="warningStrong">
-                            Awaiting a decision — pending requests cannot be withdrawn from the
-                            app.
-                        </AppText>
-                    </View>
-                ) : null}
-
-                <View
-                    style={[styles.filters, { gap: theme.spacing.xs }]}
-                    testID="leave-filters">
-                    {FILTERS.map(filter => {
-                        const isActive = filter.key === status;
-
-                        return (
-                            <Pressable
-                                key={filter.key}
-                                accessibilityRole="button"
-                                accessibilityState={{ selected: isActive }}
-                                testID={`leave-filter-${filter.key}`}
-                                onPress={() => setStatus(filter.key)}
-                                style={[
-                                    styles.filterChip,
-                                    {
-                                        paddingVertical: theme.spacing.xs,
-                                        paddingHorizontal: theme.spacing.sm,
-                                        borderRadius: theme.radius.full,
-                                        backgroundColor: isActive
-                                            ? theme.colors.primary
-                                            : theme.colors.surfaceMuted,
-                                    },
-                                ]}>
-                                <AppText
-                                    variant="caption"
-                                    color={isActive ? 'onPrimary' : 'textSecondary'}>
-                                    {filter.label}
-                                </AppText>
-                            </Pressable>
-                        );
-                    })}
-                </View>
+            <View style={styles.body}>
+                <FilterChipRow
+                    selected={status}
+                    onSelect={setStatus}
+                    pendingTotal={pendingTotal}
+                />
 
                 <FlatList<LeaveRequest>
                     data={allItems}
                     keyExtractor={request => String(request.id)}
                     testID="leave-list"
-                    contentContainerStyle={[styles.list, { gap: theme.spacing.sm }]}
+                    style={styles.list}
+                    contentContainerStyle={[
+                        styles.listContent,
+                        { paddingHorizontal: theme.screenGutter, gap: theme.spacing.sm },
+                    ]}
                     refreshing={query.isRefetching}
                     onRefresh={handleRefresh}
                     onEndReached={handleEndReached}
                     onEndReachedThreshold={0.5}
+                    /*
+                     * Every row is a fixed height, so the list can compute offsets
+                     * without measuring. This is what keeps `onEndReached` and the
+                     * scrollbar honest during a fast fling on a long feed.
+                     */
+                    getItemLayout={(_data, index) => ({
+                        length: LEAVE_ROW_HEIGHT + theme.spacing.sm,
+                        offset: (LEAVE_ROW_HEIGHT + theme.spacing.sm) * index,
+                        index,
+                    })}
+                    initialNumToRender={8}
+                    maxToRenderPerBatch={8}
+                    windowSize={7}
+                    // Android only: iOS clipping would cut the card's drop shadow off
+                    // at the cell bounds and make rows look flat.
+                    removeClippedSubviews={theme.isDark ? false : undefined}
+                    renderItem={({ item }: ListRenderItemInfo<LeaveRequest>) => (
+                        <LeaveRow request={item} onPress={handleOpenRequest} />
+                    )}
                     ListEmptyComponent={
                         <EmptyState
                             title="No leave requests"
@@ -221,7 +241,7 @@ export function LeaveListScreen({ navigation }: Props): React.JSX.Element {
                                     : `You have no ${status} leave requests.`
                             }
                             actionLabel="Request leave"
-                            onAction={() => navigation.navigate('CreateLeaveRequest')}
+                            onAction={handleCreate}
                         />
                     }
                     ListFooterComponent={
@@ -229,47 +249,87 @@ export function LeaveListScreen({ navigation }: Props): React.JSX.Element {
                             <LoadingView message="Loading more…" fullScreen={false} />
                         ) : undefined
                     }
-                    renderItem={({ item }) => (
-                        <LeaveRow
-                            request={item}
-                            onPress={() =>
-                                navigation.navigate('LeaveDetail', {
-                                    leaveRequestId: item.id,
-                                })
-                            }
-                        />
-                    )}
                 />
             </View>
 
-            <Pressable
-                accessibilityRole="button"
+            <FloatingActionButton
+                onPress={handleCreate}
                 accessibilityLabel="Request leave"
                 testID="leave-fab"
-                onPress={() => navigation.navigate('CreateLeaveRequest')}
-                style={[
-                    styles.fab,
-                    {
-                        backgroundColor: theme.colors.primary,
-                        borderRadius: theme.radius.full,
-                        width: 56,
-                        height: 56,
-                    },
-                ]}>
-                <AppText variant="title" color="onPrimary" align="center">
-                    +
-                </AppText>
-            </Pressable>
+            />
         </ScreenContainer>
     );
 }
 
+/**
+ * The horizontal filter scroller.
+ *
+ * `flexGrow: 0` is load-bearing: a `FlatList` defaults to `flex: 1` inside a column
+ * parent, which would let the chip row swallow the whole viewport and leave the feed
+ * with nothing. `showsHorizontalScrollIndicator={false}` is required by the brief and
+ * is also correct — a scrollbar under a single row of pills looks like a layout bug.
+ */
+function FilterChipRow({
+    selected,
+    onSelect,
+    pendingTotal,
+}: {
+    selected: FilterKey;
+    onSelect: (key: FilterKey) => void;
+    pendingTotal: number;
+}): React.JSX.Element {
+    const theme = useTheme();
+
+    const counts = useMemo<Partial<Record<FilterKey, number>>>(
+        () => ({ pending: pendingTotal }),
+        [pendingTotal],
+    );
+
+    return (
+        <View style={{ flexGrow: 0 }}>
+            <FlatList
+                data={FILTERS}
+                horizontal
+                keyExtractor={filter => filter.key}
+                testID="leave-filters"
+                style={styles.chipStrip}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{
+                    paddingHorizontal: theme.screenGutter,
+                    paddingVertical: theme.spacing.xs,
+                    gap: theme.spacing.xs,
+                }}
+                // Four short labels; there is nothing to defer.
+                initialNumToRender={FILTERS.length}
+                renderItem={({ item }: ListRenderItemInfo<{ key: FilterKey; label: string }>) => (
+                    <FilterChip
+                        label={item.label}
+                        selected={item.key === selected}
+                        count={counts[item.key]}
+                        onPress={() => onSelect(item.key)}
+                        testID={`leave-filter-${item.key}`}
+                    />
+                )}
+            />
+        </View>
+    );
+}
+
+/**
+ * One leave request.
+ *
+ * The accent strip is a sibling of the card body inside a clipping wrapper, not a
+ * `borderLeftWidth` on the card. A left border follows the rounded corner and so
+ * tapers into nothing at the top-left and bottom-left radii; a strip drawn across the
+ * full height and then clipped by the wrapper's `overflow: 'hidden'` keeps a constant
+ * 4pt width while still stopping at the corner.
+ */
 function LeaveRow({
     request,
     onPress,
 }: {
     request: LeaveRequest;
-    onPress: () => void;
+    onPress: (leaveRequestId: number) => void;
 }): React.JSX.Element {
     const theme = useTheme();
     const dates = `${formatDate(request.start_date)} – ${formatDate(request.end_date)}`;
@@ -280,72 +340,104 @@ function LeaveRow({
         request.end_session,
     );
     const attachmentCount = request.attachments?.length ?? 0;
+    const accent = STATUS_ACCENT[request.status];
 
     return (
-        <AppCard
-            onPress={onPress}
-            testID={`leave-card-${request.id}`}
-            accessibilityLabel={`${request.leave_type?.name ?? 'Leave'}, ${dates}, ${request.status}`}>
-            <View style={[styles.row, { gap: theme.spacing.sm }]}>
-                <View style={[styles.textBlock, { gap: theme.spacing.xxs }]}>
+        <View
+            style={[
+                styles.cardShell,
+                {
+                    backgroundColor: theme.colors.surface,
+                    // Matches `AppCard`'s resting radius so a leave card and any other
+                    // card on screen share a corner.
+                    borderRadius: radius.md,
+                    borderWidth: borderWidths.hairline,
+                    borderColor: theme.isDark ? theme.darkElevation.ring : theme.colors.border,
+                    ...theme.shadows.low,
+                },
+            ]}>
+            <View style={[styles.accent, { backgroundColor: theme.colors[accent] }]} />
+
+            <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${request.leave_type?.name ?? 'Leave'}, ${dates}, ${request.status
+                    }, ${formatTotalDays(request.total_days)}`}
+                testID={`leave-card-${request.id}`}
+                onPress={() => onPress(request.id)}
+                style={({ pressed }) => [
+                    styles.cardBody,
+                    pressed ? { backgroundColor: theme.colors.surfaceMuted } : null,
+                ]}>
+                <View style={[styles.cardText, { gap: spacing.xxs }]}>
                     <AppText variant="bodyStrong" numberOfLines={1}>
                         {request.leave_type?.name ?? 'Leave'}
                     </AppText>
-                    <AppText variant="caption" color="textSecondary">
+                    <AppText variant="caption" color="textSecondary" numberOfLines={1}>
                         {dates} · {formatTotalDays(request.total_days)}
                     </AppText>
-                    <AppText variant="caption" color="textMuted">
+                    <AppText variant="caption" color="textMuted" numberOfLines={1}>
                         {sessions}
                         {attachmentCount > 0
                             ? ` · ${attachmentCount} attachment${attachmentCount === 1 ? '' : 's'}`
                             : ''}
                     </AppText>
                     {request.reason ? (
-                        <AppText variant="caption" color="textSecondary" numberOfLines={2}>
+                        <AppText variant="caption" color="textSecondary" numberOfLines={1}>
                             {request.reason}
                         </AppText>
                     ) : null}
                 </View>
 
-                <StatusBadge status={request.status} />
-            </View>
-        </AppCard>
+                <View style={{ alignItems: 'flex-end', gap: spacing.xxs }}>
+                    <StatusBadge status={request.status} />
+                    <AppText variant="caption" color="textMuted" numberOfLines={1}>
+                        {formatRelative(request.created_at)}
+                    </AppText>
+                </View>
+            </Pressable>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
     body: {
         flex: 1,
-        paddingTop: 12,
+        paddingTop: spacing.xs,
     },
-    pendingBanner: {
-        gap: 2,
-    },
-    filters: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-    },
-    filterChip: {
-        alignItems: 'center',
-        justifyContent: 'center',
+    chipStrip: {
+        flexGrow: 0,
     },
     list: {
-        paddingBottom: 96,
-    },
-    row: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-    },
-    textBlock: {
         flex: 1,
-        flexShrink: 1,
     },
-    fab: {
+    listContent: {
+        paddingTop: spacing.xs,
+        // Clears the FAB, which floats over the last row. Without this the final
+        // card sits underneath the button and its status badge is unreachable.
+        paddingBottom: spacing.huge + spacing.xxl,
+    },
+    cardShell: {
+        flexDirection: 'row',
+        overflow: 'hidden',
+        height: LEAVE_ROW_HEIGHT,
+    },
+    accent: {
+        width: spacing.xxs,
+    },
+    cardBody: {
+        flex: 1,
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        position: 'absolute',
-        right: 16,
-        bottom: 24,
+        gap: spacing.sm,
+        paddingHorizontal: spacing.md,
+        // The left edge is flush with the strip, so only the right side needs the
+        // card's own inset.
+        paddingVertical: spacing.sm,
+        minWidth: 0,
+    },
+    cardText: {
+        flex: 1,
+        minWidth: 0,
     },
 });
+

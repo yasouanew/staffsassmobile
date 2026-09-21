@@ -1,5 +1,5 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { AppCard } from '../../../components/AppCard';
 import { AppHeader } from '../../../components/AppHeader';
@@ -9,7 +9,14 @@ import { LoadingView } from '../../../components/LoadingView';
 import { ScreenContainer } from '../../../components/ScreenContainer';
 import type { AccountStackParamList } from '../../../navigation/types';
 import { useTheme } from '../../../theme';
-import { usePreferencesStore } from '../store';
+import { usePreferencesStore, type AppearancePreference } from '../store';
+
+/** Order and copy for the appearance picker. `system` is listed first (default). */
+const APPEARANCE_OPTIONS: ReadonlyArray<{ value: AppearancePreference; label: string }> = [
+    { value: 'system', label: 'System' },
+    { value: 'light', label: 'Light' },
+    { value: 'dark', label: 'Dark' },
+];
 
 type Props = NativeStackScreenProps<AccountStackParamList, 'Preferences'>;
 
@@ -30,8 +37,10 @@ export function PreferencesScreen(_props: Props): React.JSX.Element {
     const isHydrated = usePreferencesStore(state => state.isHydrated);
     const pushEnabled = usePreferencesStore(state => state.pushEnabled);
     const rosterWeekView = usePreferencesStore(state => state.rosterWeekView);
+    const appearance = usePreferencesStore(state => state.appearance);
     const setPushEnabled = usePreferencesStore(state => state.setPushEnabled);
     const setRosterWeekView = usePreferencesStore(state => state.setRosterWeekView);
+    const setAppearance = usePreferencesStore(state => state.setAppearance);
     const reset = usePreferencesStore(state => state.reset);
 
     if (!isHydrated) {
@@ -74,6 +83,54 @@ export function PreferencesScreen(_props: Props): React.JSX.Element {
                     <AppText variant="caption" color="textMuted">
                         Shift and roster updates are sent as push notifications. If notifications are
                         blocked in your device settings, turning this on will not override that.
+                    </AppText>
+                </View>
+
+                <View style={{ gap: theme.spacing.sm }}>
+                    <AppText variant="caption" color="textSecondary">
+                        Appearance
+                    </AppText>
+
+                    <View style={[styles.segmented, { gap: theme.spacing.xs }]}>
+                        {APPEARANCE_OPTIONS.map(option => {
+                            const isSelected = option.value === appearance;
+
+                            return (
+                                <Pressable
+                                    key={option.value}
+                                    accessibilityRole="button"
+                                    accessibilityState={{ selected: isSelected }}
+                                    testID={`appearance-${option.value}`}
+                                    onPress={() => {
+                                        void setAppearance(option.value);
+                                    }}
+                                    style={[
+                                        styles.segment,
+                                        {
+                                            borderRadius: theme.radius.md,
+                                            borderWidth: theme.sizing.borderWidths.hairline,
+                                            borderColor: isSelected
+                                                ? theme.colors.primary
+                                                : theme.colors.border,
+                                            backgroundColor: isSelected
+                                                ? theme.colors.primarySoft
+                                                : theme.colors.surface,
+                                        },
+                                    ]}>
+                                    <AppText
+                                        variant="bodyStrong"
+                                        color={isSelected ? 'textLink' : 'textSecondary'}
+                                        align="center">
+                                        {option.label}
+                                    </AppText>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
+
+                    <AppText variant="caption" color="textMuted">
+                        System follows your device setting. Choosing Light or Dark pins the app to
+                        that appearance on this device.
                     </AppText>
                 </View>
 
@@ -130,5 +187,14 @@ export function PreferencesScreen(_props: Props): React.JSX.Element {
 const styles = StyleSheet.create({
     content: {
         paddingBottom: 32,
+    },
+    /** Equal-width segments laid out in a row. */
+    segmented: {
+        flexDirection: 'row',
+    },
+    segment: {
+        flex: 1,
+        paddingVertical: 10,
+        paddingHorizontal: 8,
     },
 });

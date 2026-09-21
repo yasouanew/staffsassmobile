@@ -14,10 +14,35 @@ export const controlHeights = {
     lg: 52,
 } as const;
 
-/** Icon sizes. `md` is the default for inline icons; `lg` for empty states. */
+/**
+ * Icon sizes.
+ *
+ * Two addressing modes, deliberately:
+ *
+ *  - **Presets** (`micro`/`small`/`medium`/`large`) — the Phase 2 contract. These
+ *    are the four sizes an icon is ever *supposed* to be: 12 / 16 / 24 / 32pt.
+ *    Prefer these; they are the values the atoms are tuned against.
+ *  - **Legacy numeric steps** (`xs`…`xxl`) — retained verbatim so existing
+ *    call sites reading `theme.sizing.iconSizes.md` keep working. New code
+ *    should not reach for these.
+ */
 export const iconSizes = {
+    /** Micro — inline suffix glyphs, dense metadata, badge markers. */
+    micro: 12,
+    /** Small — buttons, list rows, inputs, tab bar. */
+    small: 16,
+    /** Medium — primary actions, headers, toolbars. */
+    medium: 24,
+    /** Large — empty states, hero/illustrative slots. */
+    large: 32,
+
+    /* ---- Legacy steps (pre-Phase-2). ---- */
     xs: 14,
     sm: 16,
+    /**
+     * `md` is the default for inline icons; retained at its historical 20pt.
+     * Note this is *not* the same as the `medium` preset (24pt).
+     */
     md: 20,
     lg: 24,
     xl: 32,
@@ -25,10 +50,23 @@ export const iconSizes = {
     xxl: 48,
 } as const;
 
+/** The four canonical icon size presets. */
+export type IconSizePreset = 'micro' | 'small' | 'medium' | 'large';
+
+/**
+ * Default stroke weight for vector icons.
+ *
+ * Deliberately *not* scaled with icon size: a stroked 32pt glyph at a scaled-up
+ * stroke looks spindly, and a 12pt glyph at a scaled-down stroke fills in.
+ */
+export const ICON_STROKE_WIDTH = 2;
+
 export const avatarSizes = {
     sm: 32,
     md: 40,
     lg: 56,
+    /** `profile` — the Account hub identity header (Phase 6). */
+    profile: 64,
     xl: 72,
 } as const;
 
@@ -51,6 +89,7 @@ export const sizing = {
     minTouchTarget: MIN_TOUCH_TARGET,
     controlHeights,
     iconSizes,
+    iconStrokeWidth: ICON_STROKE_WIDTH,
     avatarSizes,
     borderWidths,
     layout,

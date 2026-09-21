@@ -1,32 +1,79 @@
-import { Pressable, StyleSheet, View } from 'react-native';
+import { memo, useCallback } from 'react';
+import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
 
+import { AppIcon, ChevronRightGlyph } from '../../../components/AppIcon';
 import { AppText } from '../../../components/AppText';
 import { StatusBadge } from '../../../components/StatusBadge';
 import { useTheme } from '../../../theme';
 import { formatDate, formatDuration, formatTime, shiftDurationMinutes } from '../../../utils/date';
 import type { Shift } from '../../shifts/types';
 
+/**
+ * Fixed row height, in points.
+ *
+ * This constant is load-bearing: it is passed to the feed's `getItemLayout`
+ * (V5), which lets the list compute scroll offsets without measuring a single
+ * row. If the rendered row drifts from this number, scroll position and
+ * `scrollToIndex` silently desync — so the row's content is clamped with
+ * `numberOfLines` rather than allowed to grow.
+ */
+export const SHIFT_ROW_HEIGHT = 76;
+
 type Props = {
     shift: Shift;
-    onPress?: () => void;
-    /** Render the date line (Home "Next up" and Roster detail). Hidden on Home "Today" where the section already says Today. */
+    onPress: (shiftId: number) => void;
+    /** Render the date line. Hidden on Home "Today", where the header already says Today. */
     showDate?: boolean;
+    /** Hide the drill-down chevron when the row is not navigable. */
+    showChevron?: boolean;
 };
 
 /**
- * One shift, as it appears on Home and in roster lists.
+ * One shift row — the single row definition shared by the Home feed and the
+ * Roster feed.
  *
- * The card leads with the times because that is what an employee opens the app to
- * check; the status badge is secondary. Duration is recomputed locally with
- * [`shiftDurationMinutes`](src/utils/date.ts:249) — which correctly handles
- * midnight-crossing shifts and unpaid breaks — rather than trusting a stored total.
+ * ## The three-slot contract
  *
- * Field names match `ShiftResource` verbatim (`date`, `paid_break`, `position`,
- * `department`). Every optional relation is guarded with `??` so a missing eager
- * load renders a plain fallback, never the string "undefined".
+ * The brief specifies the row as Left / Centre / Right, and the slots have
+ * different jobs, so they are built differently:
+ *
+ * | Slot | Content | Sizing |
+ * |------|---------|--------|
+ * | Left | start and end time | fixed `TIMES_WIDTH`, never shrinks |
+ * | Centre | location + department | `flex: 1` and **`minWidth: 0`** |
+ * | Right | status badge + chevron | intrinsic, never shrinks |
+ *
+ * The `minWidth: 0` on the centre is not optional. A flex child's default
+ * `min-width` is `auto`, meaning it refuses to shrink below its content's
+ * intrinsic width — so a long branch name would push the chevron off the right
+ * edge of the screen instead of ellipsising. Zeroing the minimum is what turns
+ * "overflow" into "truncate", which is the only acceptable failure mode in a
+ * fixed-width list row.
+ *
+ * ## Why the chevron is inside the Pressable, not beside it
+ *
+ * The whole row is one touch target, so the chevron is a purely visual
+ * affordance. It is rendered with no `accessibilityLabel` (making `AppIcon`
+ * treat it as decorative) and `pointerEvents="none"` inside `AppIcon`, so a tap
+ * on the chevron hits the row's `Pressable` rather than being swallowed by the
+ * glyph (V9).
+ *
+ * ## Why `onPress` receives the id
+ *
+ * The row is memoised and rendered as a list item, so its `onPress` must not
+ * close over a per-item arrow function created by the parent — that would be a
+ * new function identity on every render and would discard the `memo`. The row
+ * instead calls a single stable handler with its own id, letting the parent
+ * memoise both the renderer and the handler.
  */
-export function ShiftCard({ shift, onPress, showDate = true }: Props): React.JSX.Element {
+function ShiftCardComponent({
+    shift,
+    onPress,
+    showDate = true,
+    showChevron = true,
+}: Props): React.JSX.Element {
     const theme = useTheme();
+
     const minutes = shiftDurationMinutes(
         shift.start_time,
         shift.end_time,
@@ -34,100 +81,114 @@ export function ShiftCard({ shift, onPress, showDate = true }: Props): React.JSX
         shift.paid_break,
     );
 
-    const metaLine = [shift.position?.name, shift.department?.name].filter(Boolean).join(' · ');
-    const branchLine = `${shift.branch?.name ?? 'Unassigned branch'} · ${formatDuration(minutes)}`;
+    const locationLine = shift.branch?.name ?? 'Unassigned branch';
+    const departmentLine = [shift.department?.name, shift.position?.name]
+        .filter(Boolean)
+        .join(' · ');
     const notes = shift.notes?.trim() ? shift.notes.trim() : null;
 
-    const content = (
-        <View style={[styles.row, { gap: theme.spacing.md }]}>
-            <View style={[styles.times, { gap: theme.spacing.xxs }]}>
-                <AppText variant="time">{formatTime(shift.start_time)}</AppText>
-                <AppText variant="caption" color="textMuted">
-                    {formatTime(shift.end_time)}
-                </AppText>
-            </View>
-
-            <View style={[styles.details, { gap: theme.spacing.xxs }]}>
-                {showDate ? (
-                    <AppText variant="bodyStrong" numberOfLines={1}>
-                        {formatDate(shift.date)}
-                    </AppText>
-                ) : null}
-                {metaLine ? (
-                    <AppText variant="body" numberOfLines={1}>
-                        {metaLine}
-                    </AppText>
-                ) : null}
-                <AppText variant="caption" color="textSecondary" numberOfLines={1}>
-                    {branchLine}
-                </AppText>
-                {notes ? (
-                    <AppText variant="caption" color="textMuted" numberOfLines={2}>
-                        {notes}
-                    </AppText>
-                ) : null}
-            </View>
-
-            <StatusBadge status={shift.status} />
-        </View>
-    );
-
-    if (!onPress) {
-        return (
-            <View
-                style={[
-                    styles.card,
-                    {
-                        backgroundColor: theme.colors.surface,
-                        borderColor: theme.colors.border,
-                        borderRadius: theme.radius.md,
-                        borderWidth: 1,
-                        padding: theme.spacing.md,
-                    },
-                ]}
-            >
-                {content}
-            </View>
-        );
-    }
+    const handlePress = useCallback(() => onPress(shift.id), [onPress, shift.id]);
 
     return (
         <Pressable
-            onPress={onPress}
+            onPress={handlePress}
             accessibilityRole="button"
             accessibilityLabel={`Shift on ${formatDate(shift.date)} from ${formatTime(
                 shift.start_time,
             )} to ${formatTime(shift.end_time)}, ${shift.status.replace(/_/g, ' ')}`}
             style={({ pressed }) => [
-                styles.card,
+                styles.row,
                 {
                     backgroundColor: pressed ? theme.colors.surfaceMuted : theme.colors.surface,
                     borderColor: theme.colors.border,
                     borderRadius: theme.radius.md,
-                    borderWidth: 1,
-                    padding: theme.spacing.md,
                     opacity: pressed ? 0.9 : 1,
                 },
-            ]}
-        >
-            {content}
+            ]}>
+            {/* ── Left slot: the time bounds, bold. Fixed width, never shrinks. ── */}
+            <View style={[styles.times, { gap: theme.spacing.xxs }]}>
+                <AppText variant="time" numberOfLines={1}>
+                    {formatTime(shift.start_time)}
+                </AppText>
+                <AppText variant="caption" color="textMuted" numberOfLines={1}>
+                    {formatTime(shift.end_time)}
+                </AppText>
+            </View>
+
+            {/* ── Centre slot: location + department. Flexes, truncates. ── */}
+            <View style={[styles.details, { gap: theme.spacing.xxs }]}>
+                <AppText variant="bodyStrong" numberOfLines={1}>
+                    {locationLine}
+                </AppText>
+
+                {departmentLine ? (
+                    <AppText variant="caption" color="textSecondary" numberOfLines={1}>
+                        {departmentLine}
+                    </AppText>
+                ) : (
+                    <AppText variant="caption" color="textMuted" numberOfLines={1}>
+                        {formatDuration(minutes)}
+                    </AppText>
+                )}
+
+                {showDate ? (
+                    <AppText variant="caption" color="textMuted" numberOfLines={1}>
+                        {formatDate(shift.date)} · {formatDuration(minutes)}
+                    </AppText>
+                ) : null}
+
+                {notes ? (
+                    <AppText variant="caption" color="textMuted" numberOfLines={1}>
+                        {notes}
+                    </AppText>
+                ) : null}
+            </View>
+
+            {/* ── Right slot: status + drill-down affordance. Intrinsic width. ── */}
+            <View style={[styles.trailing, { gap: theme.spacing.xs }]}>
+                <StatusBadge status={shift.status} />
+                {showChevron ? (
+                    <View style={styles.chevron}>
+                        <AppIcon icon={ChevronRightGlyph} size="small" color="textMuted" />
+                    </View>
+                ) : null}
+            </View>
         </Pressable>
     );
 }
 
+export const ShiftCard = memo(ShiftCardComponent);
+
+/** Fixed so the centre slot's truncation point does not wander row to row. */
+const TIMES_WIDTH = 56;
+
+const row: ViewStyle = {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: SHIFT_ROW_HEIGHT,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    width: '100%',
+};
+
 const styles = StyleSheet.create({
-    card: {
-        width: '100%',
-    },
-    row: {
-        alignItems: 'center',
-        flexDirection: 'row',
-    },
+    row,
     times: {
         alignItems: 'flex-start',
-        minWidth: 56,
+        width: TIMES_WIDTH,
     },
     details: {
         flex: 1,
+        // See the component docblock: without this the centre refuses to
+        // shrink and pushes the chevron off-screen instead of truncating.
+        minWidth: 0,
+    },
+    trailing: {
+        alignItems: 'flex-end',
+    },
+    chevron: {
+        // The glyph is decorative; the row is the touch target.
+        pointerEvents: 'none',
     },
 });

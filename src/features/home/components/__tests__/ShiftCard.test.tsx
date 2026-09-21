@@ -1,6 +1,6 @@
 import ReactTestRenderer from 'react-test-renderer';
 
-import { ShiftCard } from '../ShiftCard';
+import { SHIFT_ROW_HEIGHT, ShiftCard } from '../ShiftCard';
 import type { Shift } from '../../../shifts/types';
 
 function makeShift(overrides: Partial<Shift> = {}): Shift {
@@ -29,15 +29,64 @@ function makeShift(overrides: Partial<Shift> = {}): Shift {
     };
 }
 
-function renderedText(shift: Shift, props: { onPress?: () => void; showDate?: boolean } = {}): string {
+type CardProps = {
+    onPress?: (shiftId: number) => void;
+    showDate?: boolean;
+    showChevron?: boolean;
+};
+
+const noop = (): void => undefined;
+
+function render(
+    shift: Shift,
+    props: CardProps = {},
+): ReactTestRenderer.ReactTestRenderer {
     let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
     ReactTestRenderer.act(() => {
-        renderer = ReactTestRenderer.create(<ShiftCard shift={shift} {...props} />);
+        renderer = ReactTestRenderer.create(
+            <ShiftCard shift={shift} onPress={props.onPress ?? noop} {...props} />,
+        );
     });
     if (!renderer) {
         throw new Error('Failed to render ShiftCard');
     }
-    return JSON.stringify(renderer.toJSON());
+    return renderer;
+}
+
+function renderedText(shift: Shift, props: CardProps = {}): string {
+    return JSON.stringify(render(shift, props).toJSON());
+}
+
+/**
+ * Collects only the *visible* text nodes, skipping any `accessibilityLabel`
+ * props. The date is deliberately always present in the accessible label (a
+ * screen reader must hear which day a card belongs to), so `showDate` is a
+ * purely visual concern and has to be asserted against rendered text.
+ */
+type RenderNode = ReactTestRenderer.ReactTestRendererNode;
+
+function visibleText(shift: Shift, props: CardProps = {}): string {
+    const parts: string[] = [];
+    const walk = (node: RenderNode | RenderNode[] | null | undefined): void => {
+        if (node === null || node === undefined) {
+            return;
+        }
+        if (typeof node === 'string') {
+            parts.push(node);
+            return;
+        }
+        if (Array.isArray(node)) {
+            node.forEach(child => walk(child));
+            return;
+        }
+        const first = node.children?.[0];
+        if (typeof first === 'string') {
+            parts.push(first);
+        }
+        node.children?.forEach(child => walk(child));
+    };
+    walk(render(shift, props).toJSON());
+    return parts.join(' ');
 }
 
 /**
@@ -56,13 +105,22 @@ describe('ShiftCard', () => {
         expect(text).not.toContain('undefined');
     });
 
-    it('hides the date line on Home Today where the section already says Today', () => {
-        const withDate = renderedText(makeShift(), { showDate: true });
-        const withoutDate = renderedText(makeShift(), { showDate: false });
+    it('hides the visible date line on Home Today where the section already says Today', () => {
+        const withDate = visibleText(makeShift(), { showDate: true });
+        const withoutDate = visibleText(makeShift(), { showDate: false });
 
         // formatDate('2026-09-16') renders a weekday form such as "Wed 16 Sep 2026".
         expect(withDate).toContain('16 Sep 2026');
         expect(withoutDate).not.toContain('16 Sep 2026');
+
+        // Removing the visual date must not strip the date from the a11y label:
+        // the section header is a sighted-only shortcut, not a screen-reader one.
+        const renderer = render(makeShift(), { showDate: false });
+        const label = String(
+            renderer.root.findByProps({ accessibilityRole: 'button' }).props
+                .accessibilityLabel ?? '',
+        );
+        expect(label).toContain('16 Sep 2026');
     });
 
     it('falls back to plain text when relations are missing, never "undefined"', () => {
@@ -81,18 +139,32 @@ describe('ShiftCard', () => {
     });
 
     it('exposes an accessible label with date, times and status for screen readers', () => {
-        let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
-        ReactTestRenderer.act(() => {
-            renderer = ReactTestRenderer.create(
-                <ShiftCard shift={makeShift()} onPress={() => undefined} />,
-            );
-        });
-        const pressable = renderer?.root.findByProps({ accessibilityRole: 'button' });
-        const label = String(pressable?.props.accessibilityLabel ?? '');
+        const renderer = render(makeShift());
+        const pressable = renderer.root.findByProps({ accessibilityRole: 'button' });
+        const label = String(pressable.props.accessibilityLabel ?? '');
 
         // formatTime renders 12h display ("9:00 AM"), so assert on that form.
         expect(label).toContain('9:00 AM');
         expect(label).toContain('5:00 PM');
         expect(label).toContain('scheduled');
+    });
+
+    it('forwards the shift id rather than the row index when pressed', () => {
+        const onPress = jest.fn();
+        const renderer = render(makeShift({ id: 4242 }), { onPress });
+        const pressable = renderer.root.findByProps({ accessibilityRole: 'button' });
+
+        ReactTestRenderer.act(() => {
+            pressable.props.onPress();
+        });
+
+        expect(onPress).toHaveBeenCalledTimes(1);
+        expect(onPress).toHaveBeenCalledWith(4242);
+    });
+
+    it('renders a fixed-height row so the parent list can use getItemLayout', () => {
+        // A constant row height is a hard requirement for the virtualized feed's
+        // O(1) offset lookup; a regression here silently breaks scroll maths.
+        expect(SHIFT_ROW_HEIGHT).toBe(76);
     });
 });

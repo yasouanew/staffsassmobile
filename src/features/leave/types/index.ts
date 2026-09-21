@@ -95,13 +95,26 @@ export type LeaveAttachmentInput = {
  * no notion of clock times at all. Inventing `start_time`/`end_time` here would
  * send fields the server ignores.
  *
- * `company_id`/`employee_id` are intentionally absent: the backend injects both
- * from the token and overwrites anything the client sends (spec §0.5).
+ * `employee_id` is **required on the wire** and must be the caller's own id,
+ * resolved from the session (`user.employee_id`). The specification claimed the
+ * server injects it, but the deployed backend validates it as `required` at the
+ * `StoreLeaveRequestRequest` layer and returns `422 {"employee_id": ["The employee
+ * id field is required."]}` when it is absent. The backend is authoritative here,
+ * so the field is typed as required — a non-optional property makes any future
+ * call site that forgets it a compile error rather than a silent 422.
  *
- * `total_days` is a non-authoritative hint (server recalculates); `attachments`
- * are sent as multipart files, never as JSON paths.
+ * `company_id` is still omitted: the backend derives it and it is not validated as
+ * required. `total_days` is a non-authoritative hint (server recalculates);
+ * `attachments` are sent as multipart files, never as JSON paths.
+ *
+ * NOTE: `GET /leave-requests` (list/detail) remains auto-scoped and MUST NOT send
+ * `employee_id` as a query parameter — the requirement applies to the create body
+ * only. These two directions genuinely differ; see
+ * [`leaveApi.list`](src/features/leave/api/leaveApi.ts:24).
  */
 export type CreateLeaveRequestPayload = {
+    /** Own employees.id from the session — required by the backend, not inferred. */
+    employee_id: number;
     leave_type_id: number;
     start_date: string;
     end_date: string;

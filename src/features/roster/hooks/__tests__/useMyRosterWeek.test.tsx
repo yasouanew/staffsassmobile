@@ -227,6 +227,59 @@ describe('useMyRosterWeek', () => {
         expect(harness.current?.selectedDate).toBe(initial);
     });
 
+    it('does not report a loading state while a navigated-to week is fetching', () => {
+        // `isPending` is true for a key with no cache entry — exactly what a new
+        // week looks like mid-flight. Gating `isLoading` on it alone swapped the
+        // screen to its full skeleton and threw away the list on every arrow
+        // press, which is the regression this pins down.
+        mockUseShifts.mockReturnValue({
+            data: undefined,
+            isPending: true,
+            isFetching: true,
+            isError: false,
+            error: null,
+            isRefetching: false,
+            refetch: jest.fn(),
+            employeeId: 9,
+        });
+
+        const harness = renderWeek('2026-09-15');
+
+        // Mount is the one moment the skeleton is allowed: the week being shown
+        // is the one the screen opened on.
+        expect(harness.current?.isLoading).toBe(true);
+
+        ReactTestRenderer.act(() => {
+            harness.current?.goToNextWeek();
+        });
+
+        expect(harness.current?.isLoading).toBe(false);
+        expect(harness.current?.isRefreshing).toBe(true);
+    });
+
+    it('treats a week change as refreshing so the empty state cannot flash', () => {
+        mockUseShifts.mockReturnValue({
+            data: undefined,
+            isPending: true,
+            isFetching: true,
+            isError: false,
+            error: null,
+            isRefetching: false,
+            refetch: jest.fn(),
+            employeeId: 9,
+        });
+
+        const harness = renderWeek('2026-09-15');
+        ReactTestRenderer.act(() => {
+            harness.current?.goToPreviousWeek();
+        });
+
+        // An empty `isRefreshing` here would let `ListEmptyComponent` render
+        // "No shifts this week" for a week that simply had not arrived yet.
+        expect(harness.current?.isRefreshing).toBe(true);
+        expect(harness.current?.groups).toEqual([]);
+    });
+
     it('refresh revalidates me plus both week sources', () => {
         const shiftsRefetch = jest.fn();
         const rostersRefetch = jest.fn();

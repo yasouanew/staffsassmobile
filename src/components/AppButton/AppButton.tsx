@@ -1,20 +1,30 @@
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 
 import { spacing } from '../../theme/spacing';
+import { MIN_TOUCH_TARGET, controlHeights } from '../../theme/sizing';
 import { useTheme } from '../../theme/useTheme';
 import { AppText } from '../AppText/AppText';
 
 /**
  * Primary action button.
  *
- * Handles the four states every form in the app needs: idle, submitting (spinner +
- * disabled), disabled, and error-adjacent (the `danger` variant, used for
- * destructive confirmations such as "Sign out everywhere").
+ * Handles the four states every form in the app needs: idle, pressed,
+ * submitting (spinner + disabled), and disabled. The `danger` variant covers the
+ * error-adjacent/destructive case (e.g. "Sign out everywhere").
  *
- * Pressed feedback is a colour change rather than an animation: it is instant, works
- * on low-end Android devices, and matches the platform's touch-feedback idiom.
+ * Two rules drive the implementation:
+ *
+ *  1. **The paint and the touch target are separate concerns.** A `sm` button is
+ *     painted 36pt tall because that is what the layout rhythm wants, but it is
+ *     still tappable across 44pt (Apple HIG / Material minimum). Shrinking the
+ *     hit area to match a visual choice is the most common accessibility defect
+ *     in a button component.
+ *  2. **Pressed feedback is composited, not animated.** A one-step `scale` +
+ *     `opacity` change is applied instantly on touch-down. There is no spring and
+ *     no timing curve, so it cannot lag the finger, works on low-end Android, and
+ *     degrades to nothing harmful when the OS "Reduce Motion" setting is on.
  */
-export type AppButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+export type AppButtonVariant = 'primary' | 'secondary' | 'text' | 'ghost' | 'danger';
 export type AppButtonSize = 'sm' | 'md' | 'lg';
 
 export type AppButtonProps = {
@@ -22,13 +32,15 @@ export type AppButtonProps = {
     onPress: () => void;
     variant?: AppButtonVariant;
     size?: AppButtonSize;
-    /** Shows a spinner and blocks interaction. Implied by `disabled`. */
+    /** Shows a spinner in the label's slot and blocks interaction. Implied by `disabled`. */
     loading?: boolean;
     disabled?: boolean;
     /** Stretches to the container width — the default for form submit buttons. */
     fullWidth?: boolean;
-    /** Optional leading element, e.g. an icon. */
+    /** Optional leading element, e.g. an [`AppIcon`](src/components/AppIcon/AppIcon.tsx:1). */
     leading?: React.ReactNode;
+    /** Optional trailing element, e.g. a disclosure chevron. */
+    trailing?: React.ReactNode;
     /** Accessibility label; falls back to `label`. */
     accessibilityLabel?: string;
     testID?: string;
@@ -49,11 +61,18 @@ export function AppButton({
     disabled = false,
     fullWidth = true,
     leading,
+    trailing,
     accessibilityLabel,
     testID,
 }: AppButtonProps) {
     const theme = useTheme();
     const isBlocked = disabled || loading;
+
+    const paintedHeight = controlHeights[size];
+    // Never smaller than the platform minimum, whatever `size` says.
+    const touchHeight = Math.max(paintedHeight, MIN_TOUCH_TARGET);
+
+    const isTextOnly = variant === 'text' || variant === 'ghost';
 
     const backgroundColor = (() => {
         if (variant === 'primary') {
@@ -80,7 +99,7 @@ export function AppButton({
             return isBlocked ? theme.colors.textMuted : theme.colors.onDanger;
         }
 
-        if (variant === 'ghost') {
+        if (isTextOnly) {
             return isBlocked ? theme.colors.textDisabled : theme.colors.textLink;
         }
 
@@ -98,17 +117,22 @@ export function AppButton({
             style={({ pressed }) => [
                 styles.base,
                 {
-                    height: theme.sizing.controlHeights[size],
+                    // Padding is computed against the *painted* height so the label
+                    // stays optically centred while the touch band stretches.
+                    minHeight: touchHeight,
+                    height: touchHeight,
                     paddingHorizontal: HORIZONTAL_PADDING[size],
                     borderRadius: theme.radius.md,
                     backgroundColor,
-                    borderWidth: variant === 'ghost' ? 0 : theme.sizing.borderWidths.hairline,
+                    borderWidth: isTextOnly ? 0 : theme.sizing.borderWidths.hairline,
                     borderColor: variant === 'secondary' ? theme.colors.border : 'transparent',
                     width: fullWidth ? '100%' : undefined,
                 },
-                pressed && !isBlocked ? { opacity: 0.85 } : null,
+                pressed && !isBlocked ? styles.pressed : null,
             ]}>
             {loading ? (
+                // The spinner replaces the row rather than joining it, so the
+                // button does not grow when it starts submitting.
                 <ActivityIndicator size="small" color={labelColor} />
             ) : (
                 <View style={styles.content}>
@@ -116,6 +140,7 @@ export function AppButton({
                     <AppText variant="bodyStrong" style={{ color: labelColor }} numberOfLines={1}>
                         {label}
                     </AppText>
+                    {trailing}
                 </View>
             )}
         </Pressable>
@@ -127,9 +152,20 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    // Instant, composited press feedback. `0.7` is the readability floor against
+    // the Ocean Blue fill; `0.98` is small enough to feel responsive and large
+    // enough that the button never appears to shrink away from the finger.
+    pressed: {
+        opacity: 0.7,
+        transform: [{ scale: 0.98 }],
+    },
     content: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         gap: spacing.xs,
+        // Lets an over-long (e.g. translated) label ellipsise instead of pushing
+        // the leading icon out of the button.
+        maxWidth: '100%',
     },
 });

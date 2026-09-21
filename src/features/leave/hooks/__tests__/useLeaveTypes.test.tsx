@@ -158,4 +158,41 @@ describe('useLeaveTypes', () => {
         const plain = renderTypes();
         expect(plain.current?.leaveTypes.map(t => t.id)).toEqual([4]);
     });
+
+    /**
+     * The refresh signal and the first-load signal answer different questions, and
+     * the Request Leave pull-to-refresh depends on that difference: `isLoading` is
+     * "nothing to show yet" (a skeleton), `isRefreshing` is "a request is in flight"
+     * (a spinner over content that is already there).
+     */
+    it('reports refreshing for any in-flight fetch, not only the first load', () => {
+        mockUseQuery.mockReturnValue(
+            queryState({ data: [makeType()], isPending: false, isFetching: true }),
+        );
+
+        const harness = renderTypes();
+
+        expect(harness.current?.isRefreshing).toBe(true);
+        // Cached types are present, so this is a repeat fetch, not a cold load.
+        expect(harness.current?.isLoading).toBe(false);
+    });
+
+    it('reports refreshing during the cold load so a pull stays engaged', () => {
+        mockUseQuery.mockReturnValue(
+            queryState({ data: undefined, isPending: true, isFetching: true }),
+        );
+
+        const harness = renderTypes();
+
+        expect(harness.current?.isRefreshing).toBe(true);
+        expect(harness.current?.isLoading).toBe(true);
+    });
+
+    it('reports not refreshing once the request settles', () => {
+        mockUseQuery.mockReturnValue(queryState({ data: [], isPending: false, isFetching: false }));
+
+        const harness = renderTypes();
+
+        expect(harness.current?.isRefreshing).toBe(false);
+    });
 });

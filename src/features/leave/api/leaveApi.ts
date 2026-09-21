@@ -45,13 +45,25 @@ export const leaveApi = {
      * `POST /leave-requests` — requires `leave_request.create`.
      *
      * Content-Type: `multipart/form-data` when attachments present, else JSON.
-     * `company_id`/`employee_id` are omitted (server injects). `total_days` is a
-     * hint only — the server recalculates via `LeaveRequestService`.
+     *
+     * `employee_id` **must** be sent and must be the caller's own id, taken from the
+     * session. The spec originally stated the server injects it, but the deployed
+     * backend validates it as required and answers
+     * `422 {"employee_id": ["The employee id field is required."]}` without it, so
+     * `CreateLeaveRequestPayload` makes the field non-optional and both branches
+     * below transmit it. `company_id` stays omitted — the backend derives it and
+     * does not validate it as required.
+     *
+     * Note the asymmetry with `list`/`detail` above, which are server-scoped and
+     * must *not* send `employee_id`: this requirement is on the create body only.
+     * `total_days` is a hint only — the server recalculates via
+     * `LeaveRequestService`.
      */
     async create(payload: CreateLeaveRequestPayload): Promise<LeaveRequest> {
         if (payload.attachments !== undefined && payload.attachments.length > 0) {
             const formData = new FormData();
 
+            formData.append('employee_id', String(payload.employee_id));
             formData.append('leave_type_id', String(payload.leave_type_id));
             formData.append('start_date', payload.start_date);
             formData.append('end_date', payload.end_date);

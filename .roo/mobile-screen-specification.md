@@ -63,7 +63,8 @@ Success via [`app/Traits/ApiResponse.php`](app/Traits/ApiResponse.php:15):
 - `users` ↔ `employees` via `employees.user_id`. See [`app/Models/Employee.php`](app/Models/Employee.php:99) and [`app/Models/User.php`](app/Models/User.php:141).
 - `GET /api/v1/auth/me` returns `UserResource` with `employee_id` when `employee` relation loaded — see [`app/Http/Resources/UserResource.php`](app/Http/Resources/UserResource.php:44). Mobile MUST call `me` after login and cache `data.employee_id`, `data.company_id`, `data.roles`, `data.permissions`.
 - `shifts` / `rosters` controllers do NOT auto-scope to own employee. They only force `company_id = user.company_id` — see [`app/Http/Controllers/Api/ShiftController.php`](app/Http/Controllers/Api/ShiftController.php:36). Mobile must pass `?employee_id=<ownId>`.
-- `leave-requests` index/store DO auto-scope employee role to own `employee_id` — see [`app/Http/Controllers/Api/LeaveRequestController.php`](app/Http/Controllers/Api/LeaveRequestController.php:44). Mobile must NOT send `employee_id` for leave (server overwrites it).
+- `leave-requests` index DO auto-scope employee role to own `employee_id` — see [`app/Http/Controllers/Api/LeaveRequestController.php`](app/Http/Controllers/Api/LeaveRequestController.php:44). Mobile must NOT send `employee_id` for the index (server overwrites it).
+- `leave-requests` store, however, **requires** `employee_id` in the body — a live `422 "The employee id field is required."` proved the server does not inject it. Mobile MUST send `employee_id` (resolved from `me.employee_id`) on create. The backend is authoritative here; the earlier "auto-injected" note was wrong.
 
 ### 0.6 Permission matrix (employee role)
 
@@ -794,7 +795,7 @@ Submit new leave request with type, dates, sessions, reason, attachments.
 
 ## 2. User Role
 
-Employee only. `leave_request.create` — see [`app/Policies/LeaveRequestPolicy.php`](app/Policies/LeaveRequestPolicy.php:52). `company_id` + `employee_id` auto-injected server-side — see [`app/Http/Controllers/Api/LeaveRequestController.php`](app/Http/Controllers/Api/LeaveRequestController.php:61).
+Employee only. `leave_request.create` — see [`app/Policies/LeaveRequestPolicy.php`](app/Policies/LeaveRequestPolicy.php:52). `company_id` is auto-injected server-side, but `employee_id` is **required in the request body** — the server does not inject it (live `422 "The employee id field is required."`). Mobile MUST send `employee_id` resolved from `me.employee_id`. See [`app/Http/Controllers/Api/LeaveRequestController.php`](app/Http/Controllers/Api/LeaveRequestController.php:61).
 
 ## 3. Navigation
 
@@ -845,7 +846,8 @@ Fields (from [`app/Http/Requests/Leave/StoreLeaveRequestRequest.php`](app/Http/R
 - `reason`: nullable string max 1000
 - `attachment`: nullable string max 2048 (legacy single)
 - `attachments`: nullable array max 5; `attachments.*` file `pdf,jpg,jpeg,png,doc,docx` max 5120KB
-- `company_id/employee_id`: MUST be omitted for employee (server injects); sending is ignored/overwritten.
+- `employee_id`: **REQUIRED** for employee — the server does NOT inject it on create and returns `422` when absent. Send own `me.employee_id`.
+- `company_id`: MUST be omitted (server injects); sending is ignored/overwritten.
 
 Controller handling of files — see [`app/Http/Controllers/Api/LeaveRequestController.php`](app/Http/Controllers/Api/LeaveRequestController.php:80): stores to `leave-request-attachments` disk `public`, sets `attachments` array + `attachment` first path.
 

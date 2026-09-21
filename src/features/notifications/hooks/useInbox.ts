@@ -72,7 +72,10 @@ export function useInbox(perPage = 30): InboxResult {
         staleTime: 15 * 1000,
     });
 
-    const serverItems = query.data?.data;
+    // The endpoint returns a custom wrapper (`data.notifications`), not a Laravel
+    // paginator, so the rows are under `notifications` — reading `data` here would
+    // silently yield `undefined` and leave the inbox empty.
+    const serverItems = query.data?.notifications;
 
     useEffect(() => {
         if (userId === null || serverItems === undefined) {

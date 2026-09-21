@@ -19,6 +19,8 @@ const mockedPostMultipart = postMultipart as jest.MockedFunction<typeof postMult
  * Pins the Leave wire contract (spec Screens 8–10 §6):
  * - `GET /leave-requests` is auto-scoped server-side: client MUST NOT send `employee_id`
  * - `POST /leave-requests` is multipart when attachments present, else JSON
+ * - `POST` MUST send `employee_id` — the backend validates it as `required`, so the
+ *   client resolves it from the session and includes it in both encodings
  * - `GET /leave-types` is the picker source (G2: 403 for employees)
  * - `GET /leave-requests/{id}` detail; no approve/reject/cancel routes exist for mobile
  */
@@ -69,10 +71,11 @@ describe('leaveApi', () => {
         expect(mockedApi.get).toHaveBeenCalledWith('/leave-requests/7');
     });
 
-    it('creates without attachments as JSON (no multipart, no employee_id)', async () => {
+    it('creates without attachments as JSON with the session employee_id', async () => {
         mockedApi.post.mockResolvedValueOnce({ id: 1 } as never);
 
         await leaveApi.create({
+            employee_id: 42,
             leave_type_id: 2,
             start_date: '2026-09-20',
             end_date: '2026-09-22',
@@ -84,6 +87,7 @@ describe('leaveApi', () => {
 
         expect(mockedPostMultipart).not.toHaveBeenCalled();
         expect(mockedApi.post).toHaveBeenCalledWith('/leave-requests', {
+            employee_id: 42,
             leave_type_id: 2,
             start_date: '2026-09-20',
             end_date: '2026-09-22',
@@ -94,10 +98,19 @@ describe('leaveApi', () => {
         });
     });
 
-    it('creates with attachments as multipart with attachments[] files', async () => {
+    it('creates with attachments as multipart carrying employee_id and attachments[] files', async () => {
         mockedPostMultipart.mockResolvedValueOnce({ id: 2 } as never);
 
+        /*
+         * Spy on the prototype *before* the call: the RN `FormData` type has no
+         * `get`, and the appends happen inside `leaveApi.create`, so instrumenting
+         * the instance afterwards would miss them. The backend rejects the body
+         * without `employee_id`, so that field must survive the multipart branch.
+         */
+        const appendSpy = jest.spyOn(FormData.prototype, 'append');
+
         await leaveApi.create({
+            employee_id: 42,
             leave_type_id: 2,
             start_date: '2026-09-20',
             end_date: '2026-09-20',
@@ -114,6 +127,7 @@ describe('leaveApi', () => {
         ];
         expect(url).toBe('/leave-requests');
         expect(formData).toBeInstanceOf(FormData);
+        expect(appendSpy).toHaveBeenCalledWith('employee_id', '42');
     });
 
     it('queries leave-types for the picker with status=active passthrough', async () => {

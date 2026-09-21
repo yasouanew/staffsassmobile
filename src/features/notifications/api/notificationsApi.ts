@@ -1,8 +1,7 @@
 import { api } from '../../../api/client';
-import type { PaginatedData } from '../../../types/api';
 import type {
-    AppNotification,
     NotificationListParams,
+    NotificationListResponse,
     UnreadCountResponse,
 } from '../types';
 
@@ -13,9 +12,15 @@ import type {
  * `employee_id` is involved here.
  */
 export const notificationsApi = {
-    /** `GET /notifications?filter=unread` — paginated. */
-    async list(params: NotificationListParams = {}): Promise<PaginatedData<AppNotification>> {
-        return api.get<PaginatedData<AppNotification>>('/notifications', { params });
+    /**
+     * `GET /notifications?filter=unread`.
+     *
+     * The controller returns a custom wrapper (`data.notifications` + `data.unread_count`
+     * + `data.meta`) rather than a Laravel paginator, so the rows are read from the
+     * `notifications` key. See spec §6 API 1.
+     */
+    async list(params: NotificationListParams = {}): Promise<NotificationListResponse> {
+        return api.get<NotificationListResponse>('/notifications', { params });
     },
 
     /** `GET /notifications/unread-count` — drives the tab badge. */

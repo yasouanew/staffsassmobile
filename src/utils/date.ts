@@ -88,6 +88,23 @@ export function parseApiDate(value: string): Date {
     return new Date(year, month - 1, day);
 }
 
+/**
+ * Tolerant counterpart to [`parseApiDate`](src/utils/date.ts:81) for UI seams that
+ * legitimately receive an empty value — an unset date field, or a partially typed one.
+ *
+ * Returns `null` instead of throwing so a caller can branch on "not yet chosen"
+ * without a try/catch, and so a native picker can be handed a sensible starting
+ * point. Still local-midnight, never UTC: `new Date('2026-09-16')` would parse as
+ * UTC midnight and render as the 15th for any user west of UTC.
+ */
+export function fromApiDate(value: string | null | undefined): Date | null {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+        return null;
+    }
+
+    return parseApiDate(value);
+}
+
 /** Today according to the device clock, formatted as `Y-m-d`. */
 export function todayApiDate(): string {
     return toApiDate(new Date());
@@ -296,4 +313,33 @@ export function formatDuration(minutes: number): string {
     }
 
     return `${hours}h ${remainder}m`;
+}
+
+export type DurationParts = {
+    /** Whole hours. `0` for sub-hour totals — never negative. */
+    hours: number;
+    /** Leftover whole minutes, `0`–`59` — never negative. */
+    minutes: number;
+};
+
+/**
+ * Splits a minute count into its hour and minute components.
+ *
+ * Exists for the Home "worked today" hero, which typesets the hours at `display`
+ * size and the remainder beside it at `subtitle` size. Doing that with
+ * [`formatDuration`](src/utils/date.ts:282) would mean string-parsing `"8h 30m"`
+ * back apart at the call site — which breaks the moment the format changes, and
+ * cannot distinguish `"0h"` (nothing) from `"0h 45m"` (45 minutes).
+ *
+ * Negative input is clamped to zero rather than producing negative parts: a
+ * negative worked total is a data fault, and rendering `"-1h 30m"` in a hero card
+ * would present a bug as a fact.
+ */
+export function formatDurationParts(minutes: number): DurationParts {
+    const safe = Number.isFinite(minutes) && minutes > 0 ? Math.floor(minutes) : 0;
+
+    return {
+        hours: Math.floor(safe / 60),
+        minutes: safe % 60,
+    };
 }

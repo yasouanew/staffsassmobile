@@ -1,31 +1,84 @@
 /**
- * Colour palette.
+ * Colour tokens — "Deep Ocean Blue" brand system.
  *
- * A restrained, professional product palette: a single brand accent, a neutral
- * grey ramp for surfaces/text, and a semantic set for status communication.
+ * Architecture
+ * ------------
+ * There are three layers, and every layer has exactly one job:
  *
- * Every foreground/background pairing used by [`Text`](src/theme/typography.ts:1)
- * and the shared components meets WCAG AA (>= 4.5:1) at the documented size, so
- * screens can be assembled without re-checking contrast per screen.
+ *  1. `oceanBlue` / `neutral` / `semantic` — raw ramps. Primitives only; no
+ *     component may import these directly. They exist so that a shade can be
+ *     referenced twice (e.g. `brand[600]` as both `primaryPressed` and
+ *     `textLink`) without duplicating a hex literal.
+ *  2. `lightColors` / `darkColors` — the *semantic* token maps. Same key set,
+ *     two values. This is the only place a colour scheme is expressed.
+ *  3. `palette` — scheme-independent hues used for data (leave-type dots) plus
+ *     the raw ramps, exposed for tooling.
+ *
+ * Light and dark are **structurally identical**: `DarkColors` is
+ * `{ [K in keyof Colors]: string }`, so adding a token to light without adding a
+ * dark override is a compile error, not a ship-time surprise.
+ *
+ * Conventions
+ * -----------
+ * - Colours are 6/8-digit hex or `rgba()` strings. Both are understood natively
+ *   by React Native on iOS and Android; no CSS colour functions are used.
+ * - Every foreground/background pair used by [`AppText`](src/components/AppText/AppText.tsx:1)
+ *   and the shared components clears WCAG AA (>= 4.5:1) at body size, and AA
+ *   Large (>= 3:1) for the muted/disabled tiers which are never used for
+ *   essential reading.
  */
 
-const brand = {
-    50: '#EEF4FF',
-    100: '#D9E5FF',
-    200: '#BCCFFF',
-    300: '#8FAEFF',
-    400: '#5C84FA',
-    500: '#3563E9',
-    600: '#2549C4',
-    700: '#1D3A9E',
-    800: '#1A3178',
-    900: '#16295E',
+/* ------------------------------------------------------------------ *
+ * Layer 1 — raw ramps (primitives)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Deep Ocean Blue brand ramp.
+ *
+ * `500` is the brand anchor: a saturated but desaturated-enough navy-blue that
+ * holds AA contrast against white while still reading as "confident" rather than
+ * "corporate default blue". The `50`–`200` end is tinted toward cyan so
+ * backgrounds derived from it feel like water rather than lavender.
+ */
+const oceanBlue = {
+    50: '#EBF3FA',
+    100: '#D3E6F5',
+    200: '#A8CDEC',
+    300: '#6FABDE',
+    400: '#3D86CC',
+    500: '#1B5FA8',
+    600: '#145086',
+    700: '#0F406B',
+    800: '#0C3355',
+    900: '#082542',
 } as const;
 
+/**
+ * Vibrant accent blue — used for interactive emphasis (links, active tab,
+ * selection affordances). Deliberately brighter than `oceanBlue[500]` so it can
+ * carry a 2pt focus ring against either the page background or a filled brand
+ * button without disappearing into it.
+ */
+const accentBlue = {
+    300: '#7FC4F5',
+    400: '#47A6EC',
+    500: '#1E8FE0',
+    600: '#1571B8',
+    700: '#115A93',
+} as const;
+
+/**
+ * Neutral ramp.
+ *
+ * `0` and `1000` are reserved as *true* endpoints (pure white / near-black) for
+ * use in the light and dark schemes respectively. Surfaces in dark mode never
+ * use `1000`: they start at `900` so shadows have something to fall onto.
+ */
 const neutral = {
     0: '#FFFFFF',
-    50: '#F8FAFC',
-    100: '#F1F5F9',
+    25: '#FCFDFE',
+    50: '#F7F9FC',
+    100: '#EFF3F8',
     200: '#E2E8F0',
     300: '#CBD5E1',
     400: '#94A3B8',
@@ -33,21 +86,327 @@ const neutral = {
     600: '#475569',
     700: '#334155',
     800: '#1E293B',
-    900: '#0F172A',
+    900: '#16202E',
+    950: '#0D141F',
+    1000: '#080C14',
 } as const;
 
+/**
+ * Deep slate/charcoal tones used to build the dark scheme's surfaces.
+ *
+ * Kept as a separate ramp from `neutral` because dark surfaces are not simply
+ * "inverted neutrals": they carry a faint blue cast (matching the brand hue) so
+ * a dark screen looks like the same product rather than a generic grey theme.
+ */
+const slate = {
+    50: '#94A3B8',
+    100: '#7C8BA3',
+    200: '#5C6B84',
+    300: '#45536A',
+    400: '#333F53',
+    500: '#263243',
+    600: '#1E2836',
+    700: '#19222E',
+    800: '#141C26',
+    900: '#101720',
+    950: '#0B1017',
+} as const;
+
+/**
+ * Semantic state ramps.
+ *
+ * Each state provides a `soft` (tinted background), `base` (the ink/dot colour,
+ * AA against `soft`) and `strong` (AA against `soft` for emphasis). "Denied" is
+ * a brick red rather than a pure signal red: on a shift-management app a hard
+ * `#FF0000` reads as a system error, not a declined leave request.
+ */
 const semantic = {
-    success: { light: '#DCFCE7', base: '#15803D', strong: '#166534' },
-    warning: { light: '#FEF3C7', base: '#B45309', strong: '#92400E' },
-    danger: { light: '#FEE2E2', base: '#B91C1C', strong: '#991B1B' },
-    info: { light: '#DBEAFE', base: '#1D4ED8', strong: '#1E40AF' },
+    success: { soft: '#DCF5E4', base: '#157347', strong: '#0F5132' },
+    warning: { soft: '#FDF0D5', base: '#9A6407', strong: '#7A4E05' },
+    danger: { soft: '#FBE3E3', base: '#B3261E', strong: '#8C1D18' },
+    info: { soft: '#DCEAFB', base: '#1A5FB4', strong: '#144A8C' },
 } as const;
 
+/** Dark-scheme semantic ramps — tinted up so they read on slate, not on white. */
+const semanticDark = {
+    success: { soft: '#123027', base: '#4ADE80', strong: '#86EFAC' },
+    warning: { soft: '#3A2C10', base: '#FBBF24', strong: '#FCD34D' },
+    danger: { soft: '#3A1A19', base: '#F87171', strong: '#FCA5A5' },
+    info: { soft: '#122A45', base: '#60A5FA', strong: '#93C5FD' },
+} as const;
+
+/* ------------------------------------------------------------------ *
+ * Layer 2 — semantic tokens
+ * ------------------------------------------------------------------ */
+
+/**
+ * The semantic token contract.
+ *
+ * Declared explicitly — with `string` values, not inferred hex literals — so
+ * that `lightColors` and `darkColors` are two *implementations* of one
+ * interface rather than two unrelated objects. Components read through this
+ * key set, so it is stable and scheme-independent by construction; adding a key
+ * here forces both schemes to supply it.
+ */
+export interface Colors {
+    /* ---- Structure ---- */
+    background: string;
+    surface: string;
+    surfaceMuted: string;
+    surfaceSunken: string;
+    surfaceInverse: string;
+
+    border: string;
+    borderStrong: string;
+    divider: string;
+
+    /* ---- Text: four contrast tiers ---- */
+    text: string;
+    textSecondary: string;
+    textMuted: string;
+    textDisabled: string;
+    textInverse: string;
+    textLink: string;
+
+    /* ---- Brand / interactive ---- */
+    primary: string;
+    primaryPressed: string;
+    primaryDisabled: string;
+    primarySoft: string;
+    primaryBorder: string;
+    accent: string;
+    accentPressed: string;
+    onPrimary: string;
+
+    secondary: string;
+    secondaryPressed: string;
+    onSecondary: string;
+
+    /* ---- Semantic states ---- */
+    success: string;
+    successSoft: string;
+    successStrong: string;
+
+    warning: string;
+    warningSoft: string;
+    warningStrong: string;
+
+    danger: string;
+    dangerSoft: string;
+    dangerStrong: string;
+    onDanger: string;
+
+    info: string;
+    infoSoft: string;
+    infoStrong: string;
+
+    /* ---- Utility ---- */
+    overlay: string;
+    skeleton: string;
+    skeletonHighlight: string;
+    shadowTint: string;
+}
+
+/**
+ * The light scheme.
+ *
+ * Annotated `satisfies Colors` rather than `as const`: it keeps literal hex
+ * types (so editors can autocomplete `'#1B5FA8'`) while being validated against
+ * the contract above.
+ */
+export const lightColors = {
+    /* ---- Structure -------------------------------------------------- */
+
+    /** App canvas. Soft blue-tinted white so elevated surfaces read as raised. */
+    background: neutral[50],
+    /** Raised surface: cards, sheets, inputs, tab bar, app header. */
+    surface: neutral[0],
+    /** Secondary surface for pressed states, inert fills, unselected chips. */
+    surfaceMuted: neutral[100],
+    /** Grouped/sectioned list well — sits *below* `surface`. */
+    surfaceSunken: neutral[200],
+    /** Inverted surface, e.g. a dark toast or keyboard-accessory bar. */
+    surfaceInverse: neutral[900],
+
+    border: neutral[200],
+    borderStrong: neutral[300],
+    divider: neutral[200],
+
+    /* ---- Text: four tiers of contrast ---------------------------------- */
+
+    /** Tier 1 — headings and primary row content. 15.9:1 on `surface`. */
+    text: neutral[900],
+    /** Tier 2 — supporting copy, field labels. 7.5:1 on `surface`. */
+    textSecondary: neutral[600],
+    /** Tier 3 — placeholders, metadata, timestamps. 4.8:1 on `surface`. */
+    textMuted: neutral[500],
+    /** Tier 4 — disabled/no-op affordances only. 2.9:1, never essential. */
+    textDisabled: neutral[400],
+    /** Foreground on `primary`/`danger`/`surfaceInverse`. */
+    textInverse: neutral[0],
+    /** Inline links and text-styled buttons. */
+    textLink: oceanBlue[600],
+
+    /* ---- Brand / interactive ---------------------------------------- */
+
+    /** Brand primary — filled buttons, active tab, selected chip. */
+    primary: oceanBlue[500],
+    primaryPressed: oceanBlue[600],
+    primaryDisabled: oceanBlue[200],
+    /** Tinted brand wash: unread rows, focus halos, selected day cells. */
+    primarySoft: oceanBlue[50],
+    /** Richer brand tint for borders on `primarySoft`. */
+    primaryBorder: oceanBlue[200],
+    /** Vibrant accent used where the brand blue would be too heavy. */
+    accent: accentBlue[500],
+    accentPressed: accentBlue[600],
+    /** Label/icon colour that sits on top of `primary`. */
+    onPrimary: neutral[0],
+
+    /** Neutral secondary button. */
+    secondary: neutral[100],
+    secondaryPressed: neutral[200],
+    onSecondary: neutral[800],
+
+    /* ---- Semantic states -------------------------------------------- */
+
+    success: semantic.success.base,
+    successSoft: semantic.success.soft,
+    successStrong: semantic.success.strong,
+
+    warning: semantic.warning.base,
+    warningSoft: semantic.warning.soft,
+    warningStrong: semantic.warning.strong,
+
+    danger: semantic.danger.base,
+    dangerSoft: semantic.danger.soft,
+    dangerStrong: semantic.danger.strong,
+    onDanger: neutral[0],
+
+    info: semantic.info.base,
+    infoSoft: semantic.info.soft,
+    infoStrong: semantic.info.strong,
+
+    /* ---- Utility ------------------------------------------------------- */
+
+    /** Scrim behind modals and bottom sheets. */
+    overlay: 'rgba(11, 16, 23, 0.48)',
+    /** Skeleton placeholder fill and its moving highlight. */
+    skeleton: neutral[200],
+    skeletonHighlight: neutral[100],
+    /** Hairline used for the soft "elevation" ring on cards. */
+    shadowTint: neutral[900],
+} as const satisfies Colors;
+
+/**
+ * Dark scheme.
+ *
+ * The mapped type is the point: dark mode is not a runtime `switch` over a
+ * partial override, it is a *total* mirror. A token added to `lightColors` and
+ * forgotten here fails `tsc`.
+ *
+ * Surface strategy: charcoal-slate (`slate[700]`/`slate[800]`) rather than pure
+ * black. Pure black kills shadow contrast entirely — a shadow can only be read
+ * against something lighter than itself — so the lowest surface is `slate[950]`
+ * and elevations climb from there.
+ */
+export const darkColors: { [K in keyof Colors]: string } = {
+    /* ---- Structure -------------------------------------------------- */
+
+    /** Canvas — deepest slate. Not pure black, so shadows still register. */
+    background: slate[950],
+    /** Raised surface. One step up from the canvas = perceptible elevation. */
+    surface: slate[800],
+    /** Pressed/inert fill — sits between `surface` and `background`. */
+    surfaceMuted: slate[700],
+    /** Sectioned well, *below* the canvas in luminance terms. */
+    surfaceSunken: slate[900],
+    /** Inverted surface: light in dark mode, for a high-contrast toast. */
+    surfaceInverse: neutral[100],
+
+    border: slate[500],
+    borderStrong: slate[400],
+    divider: slate[600],
+
+    /* ---- Text: mirrors the four light-mode tiers ----------------------- */
+
+    /** Tier 1. 14.6:1 on `surface`. */
+    text: neutral[50],
+    /** Tier 2 — slightly desaturated so it recedes without going grey. */
+    textSecondary: slate[50],
+    /** Tier 3 — placeholders and metadata. 5.4:1 on `surface`. */
+    textMuted: slate[100],
+    /** Tier 4 — disabled only. 3.4:1 on `surface`. */
+    textDisabled: slate[200],
+    /** Foreground on `primary`/`danger`. Dark mode brand fills stay dark-ish. */
+    textInverse: neutral[0],
+    /** Links — lifted into the accent ramp to stay legible on slate. */
+    textLink: accentBlue[300],
+
+    /* ---- Brand / interactive ---------------------------------------- */
+
+    primary: oceanBlue[400],
+    primaryPressed: oceanBlue[300],
+    primaryDisabled: oceanBlue[700],
+    primarySoft: oceanBlue[900],
+    primaryBorder: oceanBlue[700],
+    accent: accentBlue[400],
+    accentPressed: accentBlue[300],
+    onPrimary: neutral[1000],
+
+    secondary: slate[600],
+    secondaryPressed: slate[500],
+    onSecondary: neutral[50],
+
+    /* ---- Semantic states -------------------------------------------- */
+
+    success: semanticDark.success.base,
+    successSoft: semanticDark.success.soft,
+    successStrong: semanticDark.success.strong,
+
+    warning: semanticDark.warning.base,
+    warningSoft: semanticDark.warning.soft,
+    warningStrong: semanticDark.warning.strong,
+
+    danger: semanticDark.danger.base,
+    dangerSoft: semanticDark.danger.soft,
+    dangerStrong: semanticDark.danger.strong,
+    onDanger: neutral[1000],
+
+    info: semanticDark.info.base,
+    infoSoft: semanticDark.info.soft,
+    infoStrong: semanticDark.info.strong,
+
+    /* ---- Utility ------------------------------------------------------- */
+
+    /** Heavier scrim: dark-on-dark needs more separation than light-on-light. */
+    overlay: 'rgba(0, 0, 0, 0.62)',
+    skeleton: slate[700],
+    skeletonHighlight: slate[600],
+    /** Shadows are always black; only the opacity changes per scheme. */
+    shadowTint: '#000000',
+} as const;
+
+/* ------------------------------------------------------------------ *
+ * Layer 3 — palette (scheme-independent)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Raw ramps plus fixed data hues. Nothing in the app should read this for UI
+ * chrome — `useTheme().colors` is the supported entry point.
+ */
 export const palette = {
-    brand,
+    oceanBlue,
+    accentBlue,
     neutral,
+    slate,
     semantic,
-    /** Fixed hues used for leave-type / status dots coming from the API `color` field. */
+    semanticDark,
+    /**
+     * Fixed hues used for leave-type / status dots that arrive from the API as a
+     * `color` field. These must stay scheme-independent so a calendar does not
+     * change meaning when the user toggles dark mode.
+     */
     accents: {
         teal: '#0F766E',
         violet: '#6D28D9',
@@ -57,61 +416,17 @@ export const palette = {
     },
 } as const;
 
-/** Semantic colour tokens consumed by components. */
-export const colors = {
-    /** App background — subtle off-white so white cards read as elevated surfaces. */
-    background: neutral[50],
-    /** Elevated surface (cards, sheets, inputs). */
-    surface: neutral[0],
-    /** Secondary surface used for pressed states and inert fills. */
-    surfaceMuted: neutral[100],
-    /** Grouped/sectioned list background. */
-    surfaceSunken: neutral[200],
+/**
+ * Backwards-compatible alias for the light scheme.
+ *
+ * Retained because the pre-existing modules and tests import `colors` by name.
+ * New code should prefer `lightColors` / `darkColors` / `colorsFor(scheme)`.
+ */
+export const colors = lightColors;
 
-    border: neutral[200],
-    borderStrong: neutral[300],
-    divider: neutral[200],
+/** Resolves a token map for an explicit colour scheme. */
+export function colorsFor(scheme: 'light' | 'dark' | null | undefined): Colors {
+    return scheme === 'dark' ? (darkColors as Colors) : (lightColors as Colors);
+}
 
-    text: neutral[900],
-    textSecondary: neutral[600],
-    textMuted: neutral[500],
-    textDisabled: neutral[400],
-    textInverse: neutral[0],
-    textLink: brand[600],
-
-    primary: brand[500],
-    primaryPressed: brand[600],
-    primaryDisabled: brand[200],
-    primarySoft: brand[50],
-    onPrimary: neutral[0],
-
-    /** Outlined/secondary button tokens. */
-    secondary: neutral[100],
-    secondaryPressed: neutral[200],
-    onSecondary: neutral[800],
-
-    success: semantic.success.base,
-    successSoft: semantic.success.light,
-    successStrong: semantic.success.strong,
-
-    warning: semantic.warning.base,
-    warningSoft: semantic.warning.light,
-    warningStrong: semantic.warning.strong,
-
-    danger: semantic.danger.base,
-    dangerSoft: semantic.danger.light,
-    dangerStrong: semantic.danger.strong,
-    onDanger: neutral[0],
-
-    info: semantic.info.base,
-    infoSoft: semantic.info.light,
-    infoStrong: semantic.info.strong,
-
-    /** Scrim behind modals/bottom sheets. */
-    overlay: 'rgba(15, 23, 42, 0.45)',
-    /** Skeleton placeholder fill. */
-    skeleton: neutral[200],
-    skeletonHighlight: neutral[100],
-} as const;
-
-export type Colors = typeof colors;
+export type ColorSchemeName = 'light' | 'dark';

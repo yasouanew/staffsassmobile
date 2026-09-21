@@ -1,4 +1,4 @@
-import type { NotificationFilter } from '../../../types/api';
+import type { NotificationFilter, PaginationMeta } from '../../../types/api';
 
 /**
  * Notification types.
@@ -24,6 +24,21 @@ export type NotificationListParams = {
     filter?: NotificationFilter;
     page?: number;
     per_page?: number;
+};
+
+/**
+ * `GET /notifications` payload.
+ *
+ * This endpoint does **not** return a standard Laravel paginator: the controller
+ * wraps the collection itself, so the rows live under `data.notifications` rather
+ * than `data.data`, and the unread count travels alongside them. Reading the wrong
+ * key silently yields `undefined` and an empty screen, so this type is the single
+ * place that shape is declared.
+ */
+export type NotificationListResponse = {
+    notifications: AppNotification[];
+    unread_count: number;
+    meta: PaginationMeta;
 };
 
 export type UnreadCountResponse = {

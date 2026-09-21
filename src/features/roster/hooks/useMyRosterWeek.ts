@@ -59,6 +59,17 @@ export type MyRosterWeek = {
 export function useMyRosterWeek(initialDate?: string): MyRosterWeek {
     const queryClient = useQueryClient();
     const [selectedDate, setSelectedDate] = useState(() => initialDate ?? todayApiDate());
+    /**
+     * The first week ever shown in this screen instance.
+     *
+     * The full-screen skeleton is a first-paint concept only: it should cover the
+     * cold `isPending` window on mount, never a week the user navigated to. Using
+     * the week itself as the identity for that distinction (rather than a boolean
+     * flag) means the very first fetch after the screen opens is the one that
+     * gets the skeleton, while every subsequent arrow press is treated as a
+     * transition and keeps the chrome on screen.
+     */
+    const [firstWeek] = useState(() => startOfWeek(initialDate ?? todayApiDate(), 1));
 
     const weekStart = startOfWeek(selectedDate, 1);
     const weekEnd = addDays(weekStart, 6);
@@ -101,7 +112,25 @@ export function useMyRosterWeek(initialDate?: string): MyRosterWeek {
     );
 
     const employeeId = shiftsQuery.employeeId;
-    const isLoading = employeeId !== null && (shiftsQuery.isPending || rostersQuery.isPending);
+
+    /**
+     * Cached mean "show the data now", not "show a skeleton".
+     *
+     * A fresh week's key has no cache entry, so `isPending` is momentarily true
+     * for the entire time an arrow-press fetch is in flight. Feeding that into
+     * `isLoading` (as this hook previously did) handed the screen a full swap to
+     * the skeleton branch — and with it the loss of the `SectionList` and its
+     * scroll position — every time the user stepped one week across. Treating a
+     * key that already holds data as loaded keeps the previous week's cards in
+     * place while the new week arrives; `isRefreshing` is what tells the screen a
+     * transition is happening so it can show the in-place `SkeletonRosterGroup`
+     * instead. Only a genuinely empty, never-fetched week is "loading".
+     */
+    const isShowingFirstWeek = weekStart === firstWeek;
+    const isLoading =
+        employeeId !== null &&
+        (shiftsQuery.isPending || rostersQuery.isPending) &&
+        (isShowingFirstWeek || !shiftsQuery.isFetching);
 
     const refresh = (): void => {
         void queryClient.invalidateQueries({ queryKey: queryKeys.session.me() });
@@ -125,7 +154,13 @@ export function useMyRosterWeek(initialDate?: string): MyRosterWeek {
         isLoading,
         isError: shiftsQuery.isError,
         error: shiftsQuery.error as AppError,
-        isRefreshing: shiftsQuery.isRefetching || rostersQuery.isRefetching,
+        /**
+         * Also true during a week change, not only on pull-to-refresh: the screen
+         * uses this flag to decide between the in-place placeholder and the
+         * "no shifts this week" empty state, and a week that is still arriving
+         * must not be reported as empty.
+         */
+        isRefreshing: shiftsQuery.isFetching || rostersQuery.isRefetching,
         refresh,
     };
 }
